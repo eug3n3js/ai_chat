@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SSE Client for /queries/sse</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; }
+      textarea { width: 100%; min-height: 80px; }
+      pre { background: #111827; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; max-height: 300px; overflow: auto; }
+      button { padding: 0.5rem 1rem; margin-top: 0.5rem; margin-right: .5rem; }
+    </style>
+  </head>
+  <body>
+    <h1>SSE client for <code>GET /queries/sse?text=...</code></h1>
+
+    <label>
+      API base URL:
+      <input id="baseUrl" type="text" value="http://localhost:3000" style="width: 100%;" />
+    </label>
+
+    <label style="display:block; margin-top:1rem;">
+      Query text:
+      <textarea id="text">Які найнадійніші моделі Ford для щоденної їзди українськими дорогами?</textarea>
+    </label>
+
+    <button id="startBtn">Start SSE request</button>
+    <button id="stopBtn" disabled>Stop</button>
+
+    <h2>Events</h2>
+    <pre id="log"></pre>
+
+    <script>
+      const baseUrlInput = document.getElementById('baseUrl');
+      const textInput = document.getElementById('text');
+      const startBtn = document.getElementById('startBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      const logEl = document.getElementById('log');
+
+      let es = null;
+      let finished = false; // получили completed/failed
+
+      function logLine(kind, payload) {
+        const time = new Date().toISOString().split('T')[1].replace('Z', '');
+        logEl.textContent += `${time} [${kind}] ${payload}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function closeStream(reason = 'closed') {
+        if (es) {
+          es.close();
+          es = null;
+        }
+        logLine('info', `Stream ${reason}`);
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+
+      startBtn.onclick = () => {
+        if (es) {
+          closeStream('restarted');
+        }
+
+        const base = baseUrlInput.value.replace(/\/+$/, '');
+        const params = new URLSearchParams({ text: textInput.value });
+        const url = `${base}/queries/sse?${params.toString()}`;
+
+        logEl.textContent = '';
+        logLine('info', `Connecting to ${url}`);
+
+        es = new EventSource(url);
+        finished = false;
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        es.onopen = () => {
+          logLine('info', 'SSE connection opened');
+        };
+
+        function handleEvent(evt) {
+          logLine('raw', `type=${evt.type} evt.data = ${evt.data}`);
+
+          let msg;
+          try {
+            msg = JSON.parse(evt.data);
+          } catch {
+            logLine(evt.type, evt.data);
+            return;
+          }
+
+          const kind = msg.event || evt.type || 'message';
+          logLine(kind, JSON.stringify(msg));
+
+          if (kind === 'completed' || kind === 'failed') {
+            finished = true;
+            // не закрываем здесь, даём серверу закрыть соединение
+          }
+        }
+
+        // события без имени (event: <none>)
+        es.onmessage = handleEvent;
+        // именованные SSE-события от сервера
+        es.addEventListener('progress', handleEvent);
+        es.addEventListener('completed', handleEvent);
+        es.addEventListener('failed', handleEvent);
+
+        es.onerror = (err) => {
+          if (finished) {
+            logLine('info', `SSE closed after completion (readyState=${es ? es.readyState : 'n/a'})`);
+          } else {
+            console.error('SSE connection error:', err);
+            logLine('error', `SSE error (readyState=${es ? es.readyState : 'n/a'})`);
+          }
+          closeStream(finished ? 'closed after completion' : 'ended (onerror)');
+        };
+      };
+
+      stopBtn.onclick = () => {
+        closeStream('stopped by client');
+      };
+    </script>
+  </body>
+</html>
