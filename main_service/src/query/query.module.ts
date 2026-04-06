@@ -11,6 +11,8 @@ import { EmbeddingModelModule } from '../common/embedding-model/embedding-model.
 import { SemanticFirewallModule } from '../common/semantic-firewall/semantic-firewall.module';
 import { SemanticCacheModule } from 'src/semantic-cache/semantic-cache.module';
 import { RequestLogModule } from 'src/request-log/request-log.module';
+import { TokenBucketGuard } from 'src/common/guards/token-bucket.guard';
+import { RateLimiterModule } from 'src/rate-limiter/rate-limiter.module';
 
 @Module({
   imports: [
@@ -24,9 +26,10 @@ import { RequestLogModule } from 'src/request-log/request-log.module';
     SemanticFirewallModule,
     SemanticCacheModule,
     RequestLogModule,
+    RateLimiterModule,
   ],
   controllers: [QueryController],
-  providers: [QueryService],
+  providers: [QueryService, TokenBucketGuard],
   exports: [QueryService],
 })
 export class QueryModule {}

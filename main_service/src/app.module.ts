@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { join } from 'path';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { QueryModule } from './query/query.module';
 import { RequestLogModule } from './request-log/request-log.module';
 import { Query } from './query/entities/query.entity';
@@ -17,28 +16,40 @@ import { SemanticFirewallModule } from './common/semantic-firewall/semantic-fire
 import { BullModule } from '@nestjs/bullmq';
 import { ResponseModule } from './response/response.module';
 import { SemanticCacheModule } from './semantic-cache/semantic-cache.module';
+import { RateLimiterModule } from './rate-limiter/rate-limiter.module';
+import { AuthModule } from './auth/auth.module';
+import { RecaptchaModule } from './recaptcha/recaptcha.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: join(__dirname, '..', '.env'),
     }),
     EventEmitterModule.forRoot(),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      host: process.env.DB_HOST || 'postgres',
-      port: Number(process.env.DB_PORT) || 5432,
-      username: process.env.DB_USER || 'app_user',
-      password: process.env.DB_PASSWORD || 'app_password',
-      database: process.env.DB_NAME || 'app_db',
-      entities: [Query, RequestLog, Response],
-      synchronize: true,
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        type: 'postgres',
+        host: configService.getOrThrow<string>('DB_HOST'),
+        port: Number(configService.getOrThrow<string>('DB_PORT')),
+        username: configService.getOrThrow<string>('DB_USER'),
+        password: configService.getOrThrow<string>('DB_PASSWORD'),
+        database: configService.getOrThrow<string>('DB_NAME'),
+        entities: [Query, RequestLog, Response],
+        synchronize: false,
+      }),
+      inject: [ConfigService],
     }),
-    BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST || 'redis',
-        port: Number(process.env.REDIS_PORT) || 6379,
-      },
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        connection: {
+          host: configService.getOrThrow<string>('REDIS_HOST'),
+          port: Number(configService.getOrThrow<string>('REDIS_PORT')),
+        },
+      }),
+      inject: [ConfigService],
     }),
     QueryModule,
     RequestLogModule,
@@ -49,8 +60,9 @@ import { SemanticCacheModule } from './semantic-cache/semantic-cache.module';
     SemanticFirewallModule,
     ResponseModule,
     SemanticCacheModule,
+    RateLimiterModule,
+    AuthModule,
+    RecaptchaModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

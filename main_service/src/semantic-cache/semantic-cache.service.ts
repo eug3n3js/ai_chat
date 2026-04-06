@@ -4,7 +4,6 @@ import { ChromaService } from '../common/chroma/chroma.service';
 import { ResponseService } from '../response/response.service';
 import { Response } from '../response/entities/response.entity';
 
-const DEFAULT_THRESHOLD = 0.9;
 
 @Injectable()
 export class SemanticCacheService {
@@ -16,7 +15,7 @@ export class SemanticCacheService {
     private readonly responseService: ResponseService,
   ) {
     this.threshold =
-      Number(this.configService.get<string>('SEMANTIC_CACHE_THRESHOLD')) || DEFAULT_THRESHOLD;
+      Number(this.configService.getOrThrow<string>('SEMANTIC_CACHE_THRESHOLD'));
   }
 
   async findRelevantByEmbedding(embedding: number[]): Promise<Response | null> {

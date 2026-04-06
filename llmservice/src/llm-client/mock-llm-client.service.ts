@@ -11,7 +11,7 @@ function delay(ms: number): Promise<void> {
 
 @Injectable()
 export class MockLlmClientService implements ILlmClient {
-  async *streamAnswer(prompt: string): AsyncIterable<string> {
+  async *streamAnswer(prompt: string, _jobId: string): AsyncIterable<string> {
     const words = prompt.trim().split(/\s+/).filter(Boolean);
     for (const word of words) {
       yield word + ' ' + String(Math.random());

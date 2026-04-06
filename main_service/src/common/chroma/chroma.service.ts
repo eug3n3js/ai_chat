@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ChromaClient, Collection } from 'chromadb';
 import { v4 } from 'uuid';
+import { ChromaOperationError } from 'src/common/exceptions/chroma.exception';
+import { ConfigService } from '@nestjs/config';
 
 export interface ChromaSearchResult {
   id: string;
@@ -13,45 +15,82 @@ const FIREWALL_COLLECTION = 'firewall';
 
 @Injectable()
 export class ChromaService {
-  private readonly client = new ChromaClient({
-    path: process.env.CHROMA_URL || 'http://chromadb:8000',
-  });
+  private readonly logger = new Logger(ChromaService.name);
+  private readonly client: ChromaClient;
+
+  constructor(private readonly configService: ConfigService) {
+    const chromaUrl = new URL(this.configService.getOrThrow<string>('CHROMA_URL'));
+    this.client = new ChromaClient({
+      host: this.configService.getOrThrow<string>('CHROMA_HOST'),
+      port: Number(this.configService.getOrThrow<string>('CHROMA_PORT')),
+      ssl: this.configService.getOrThrow<string>('CHROMA_SSL') === 'true',
+    });
+  }
+
+  private async run<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (e: unknown) {
+      if (e instanceof ChromaOperationError) {
+        throw e;
+      }
+      this.logger.error(`[Chroma] ${operation}`, String(e));
+      throw new ChromaOperationError(operation, e);
+    }
+  }
 
   private async getOrCreateCosineCollection(name: string): Promise<Collection> {
-    return this.client.getOrCreateCollection({
+    return await this.client.getOrCreateCollection({
       name,
       metadata: { 'hnsw:space': 'cosine' },
     });
   }
 
-  async deleteCollection(name: string): Promise<void> {
-    try {
-      await this.client.deleteCollection({ name });
-    } catch (e: any) {
-      if (e?.name === 'ChromaNotFoundError') {
-        return;
-      }
-      throw e;
-    }
-  }
-
   async deleteCacheCollection(): Promise<void> {
-    await this.deleteCollection(CACHE_COLLECTION);
+    await this.run<void>('deleteCacheCollection', this.deleteCollectionInternal.bind(this, CACHE_COLLECTION));
   }
 
   async deleteFirewallCollection(): Promise<void> {
-    await this.deleteCollection(FIREWALL_COLLECTION);
+    await this.run<void>('deleteFirewallCollection', this.deleteCollectionInternal.bind(this, FIREWALL_COLLECTION));
   }
 
   async addCacheRecord(embedding: number[], responseId: string): Promise<void> {
-    await this.addRecord(CACHE_COLLECTION, embedding, responseId);
+    await this.run<void>('addCacheRecord', this.addRecordInternal.bind(this, CACHE_COLLECTION, embedding, responseId));
   }
 
   async addFirewallRecord(embedding: number[]): Promise<void> {
-    await this.addRecord(FIREWALL_COLLECTION, embedding, String(v4()));
+    await this.run<void>('addFirewallRecord', this.addRecordInternal.bind(this, FIREWALL_COLLECTION, embedding, String(v4())));
   }
 
-  async addRecord(
+  async deleteCacheRecord(responseId: string): Promise<void> {
+    await this.run<void>('deleteCacheRecord', this.deleteRecordInternal.bind(this, CACHE_COLLECTION, responseId));
+  }
+
+  async deleteFirewallRecord(id: string): Promise<void> {
+    await this.run<void>('deleteFirewallRecord', this.deleteRecordInternal.bind(this, FIREWALL_COLLECTION, id));
+  }
+
+  async searchCacheWithThreshold(queryEmbedding: number[], minSimilarity: number): Promise<ChromaSearchResult[]> {
+    return this.run<ChromaSearchResult[]>('searchCacheWithThreshold', this.searchCosineWithThresholdInternal.bind(this, CACHE_COLLECTION, queryEmbedding, minSimilarity, 1));
+  }
+
+  async searchFirewallWithThreshold(queryEmbedding: number[], minSimilarity: number): Promise<ChromaSearchResult[]> {
+    return this.run<ChromaSearchResult[]>('searchFirewallWithThreshold', this.searchCosineWithThresholdInternal.bind(this, FIREWALL_COLLECTION, queryEmbedding, minSimilarity, 1));
+  }
+
+  private async deleteCollectionInternal(name: string): Promise<void> {
+    try {
+      await this.client.deleteCollection({ name });
+    } catch (e: unknown) {
+      const err = e as { name?: string };
+      if (err?.name === 'ChromaNotFoundError') {
+        return;
+      }
+      throw new ChromaOperationError('deleteCollection', e);
+    }
+  }
+
+  private async addRecordInternal(
     collectionName: string,
     embedding: number[],
     responseId: string,
@@ -63,35 +102,16 @@ export class ChromaService {
     });
   }
 
-  async deleteRecord(collectionName: string, id: string): Promise<void> {
+  private async deleteRecordInternal(collectionName: string, id: string): Promise<void> {
     const collection = await this.getOrCreateCosineCollection(collectionName);
     await collection.delete({ ids: [id] });
   }
 
-  async deleteCacheRecord(responseId: string): Promise<void> {
-    await this.deleteRecord(CACHE_COLLECTION, responseId);
-  }
-
-  async deleteFirewallRecord(id: string): Promise<void> {
-    await this.deleteRecord(FIREWALL_COLLECTION, id);
-  }
-
-
-
-  async searchCacheWithThreshold(queryEmbedding: number[], minSimilarity: number): Promise<ChromaSearchResult[]> {
-    return this.searchCosineWithThreshold(CACHE_COLLECTION, queryEmbedding, minSimilarity, 1);
-  }
-
-
-  async searchFirewallWithThreshold(queryEmbedding: number[], minSimilarity: number): Promise<ChromaSearchResult[]> {
-    return this.searchCosineWithThreshold(FIREWALL_COLLECTION, queryEmbedding, minSimilarity, 1);
-  }
-
-  async searchCosineWithThreshold(
+  private async searchCosineWithThresholdInternal(
     collectionName: string,
     queryEmbedding: number[],
     minSimilarity: number,
-    limit: number
+    limit: number,
   ): Promise<ChromaSearchResult[]> {
     const collection = await this.getOrCreateCosineCollection(collectionName);
 
@@ -112,9 +132,9 @@ export class ChromaService {
       .map((id, index) => ({
         id,
         text: docs[index] as string,
-        similarity: Number((1 - (distances[index] ?? 1)).toFixed(4)),
+        similarity: Number((1 - (distances?.[index] ?? 1)).toFixed(4)),
       }))
-      .filter((item) => item.similarity >= minSimilarity)
-      .sort((a, b) => b.similarity - a.similarity);
+      .sort((a, b) => b.similarity - a.similarity)
+      .filter((item) => item.similarity >= minSimilarity);
   }
 }

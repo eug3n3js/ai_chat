@@ -1,3 +1,3 @@
 export interface ILlmClient {
-  streamAnswer(prompt: string): AsyncIterable<string>;
+  streamAnswer(prompt: string, jobId: string): AsyncIterable<string>;
 }

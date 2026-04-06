@@ -5,7 +5,7 @@ import {
   QueueEventsListener,
 } from '@nestjs/bullmq';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Job, Queue } from 'bullmq';
+import { Queue } from 'bullmq';
 
 const QUEUE_NAME = 'llm-service';
 const TASK_NAME = 'llm-query';
