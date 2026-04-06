@@ -51,6 +51,13 @@ This project uses separate env files per service:
 - `main_service/.env`
 - `llmservice/.env`
 
+Before first run, copy sample files:
+
+```bash
+cp main_service/.env.sample main_service/.env
+cp llmservice/.env.sample llmservice/.env
+```
+
 ### `main_service/.env` (required keys)
 
 - DB: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
