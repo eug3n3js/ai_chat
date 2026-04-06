@@ -1,3 +1,6 @@
 *.gguf
 **/*.gguf
-ollama/models/**
+.venv/
+**/.venv/
+node_modules/
+**/node_modules/
